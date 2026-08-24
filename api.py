@@ -1,6 +1,7 @@
 from flask import Flask, request
 import auth
 import orders
+import orders
 
 app = Flask(__name__)
 db = {"admin": {"password": "5f4dcc3b5aa765d61d8327deb882cf99"}}
