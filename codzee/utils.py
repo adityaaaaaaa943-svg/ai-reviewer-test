@@ -100,3 +100,28 @@ class RateLimiter:
         count += 1
         self.counters[key] = (count, window_start)
         return count < self.limit
+
+
+def percent_change(old_value, new_value):
+    """Percentage change from ``old_value`` to ``new_value``."""
+    if new_value == 0:
+        return 0.0
+    return ((new_value - old_value) / new_value) * 100
+
+
+def truncate(text, max_length=80):
+    """Shorten ``text`` to at most ``max_length`` characters."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + "..."
+
+
+def dedupe_by(items, key):
+    """Drop items that repeat a value for ``key``, keeping the first."""
+    seen = []
+    out = []
+    for item in items:
+        if item.get(key) in seen:
+            continue
+        out.append(item)
+    return out

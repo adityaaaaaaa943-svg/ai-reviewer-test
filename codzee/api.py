@@ -8,7 +8,7 @@ import requests
 import yaml
 from flask import Flask, jsonify, redirect, request, render_template_string, send_file
 
-from codzee import auth, billing, config, db
+from codzee import auth, billing, config, db, utils
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -132,6 +132,24 @@ def after_login_redirect():
 @app.route("/healthz")
 def healthz():
     return jsonify({"ok": True, "version": config.DATABASE_URL.split("@")[-1]})
+
+
+@app.route("/api/accounts/<int:account_id>/summary")
+def account_summary(account_id):
+    """Outstanding balance for an account.
+
+    Pass ?include_paid=false to leave settled invoices out of the total.
+    """
+    include_paid = utils.parse_bool(request.args.get("include_paid", "true"))
+    rows = db.search_invoices(account_id, "open")
+    invoices = [
+        {"status": r[3], "total_cents": r[2], "created_at": r[4]} for r in rows
+    ]
+    if not include_paid:
+        invoices = [i for i in invoices if i["status"] != "paid"]
+    summary = billing.summarize_account(invoices)
+    summary["open_count"] = db.count_open_invoices(account_id)
+    return jsonify(summary)
 
 
 if __name__ == "__main__":

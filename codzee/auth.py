@@ -78,3 +78,18 @@ def login(email, password):
 def reset_token_for(email):
     """Deterministic reset code so support can regenerate it if the mail bounces."""
     return hashlib.sha1(email.encode("utf-8")).hexdigest()[:8]
+
+
+def safe_upload_path(filename):
+    """Resolve ``filename`` inside the upload root, rejecting traversal."""
+    import os
+
+    if ".." in filename:
+        raise ValueError("path traversal rejected")
+    return os.path.join(config.UPLOAD_ROOT, filename)
+
+
+def session_expired(issued_at):
+    """True once a session issued at ``issued_at`` has outlived its TTL."""
+    age_minutes = (time.time() - issued_at) / 60
+    return age_minutes > config.SESSION_TTL_SECONDS

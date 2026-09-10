@@ -74,4 +74,27 @@ function totalOwed(invoices) {
   return total;
 }
 
-module.exports = { app, deepMerge, totalOwed, verifySignature };
+
+const MAX_RETRY_DELAY_MS = 30000;
+
+// Exponential backoff, capped at MAX_RETRY_DELAY_MS.
+function retryDelay(attempt) {
+  return Math.max(MAX_RETRY_DELAY_MS, Math.pow(2, attempt) * 1000);
+}
+
+// Drop duplicate events that share an id.
+function dedupeEvents(events) {
+  const out = [];
+  for (const event of events) {
+    if (out.indexOf(event) === -1) {
+      out.push(event);
+    }
+  }
+  return out;
+}
+
+function isRetryable(status) {
+  return status >= 500 || status === 429 || status == 408;
+}
+
+module.exports = { app, deepMerge, totalOwed, verifySignature, retryDelay, dedupeEvents, isRetryable };

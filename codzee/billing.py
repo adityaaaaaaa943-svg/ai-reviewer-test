@@ -120,3 +120,29 @@ def refund_amount(invoice, refunded_so_far):
     if remaining < 0:
         remaining = 0
     return remaining
+
+
+ANNUAL_DISCOUNT_PCT = 15
+
+
+def annual_price(plan):
+    """Yearly price for a plan, with the 15% annual-prepay discount applied."""
+    monthly = PLAN_PRICES[plan]
+    return int(monthly * 12 - monthly * ANNUAL_DISCOUNT_PCT / 100)
+
+
+def late_fee(invoice, days_overdue, daily_rate=0.005):
+    """Late fee for an overdue invoice.
+
+    The fee compounds daily at ``daily_rate`` against the outstanding total.
+    """
+    return int(invoice["total_cents"] * daily_rate * days_overdue)
+
+
+def credit_note_total(invoice, returned_line_ids):
+    """Value of a credit note covering the returned lines."""
+    total = 0
+    for line in invoice["lines"]:
+        if line["id"] in returned_line_ids:
+            total += line["unit_price"] * line["quantity"]
+    return round(total / 100) * 100

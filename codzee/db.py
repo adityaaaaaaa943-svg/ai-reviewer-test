@@ -85,3 +85,12 @@ def transfer_credit(from_account, to_account, amount_cents):
     )
     conn.commit()
     return True
+
+
+def count_open_invoices(account_id):
+    """Number of invoices still open for an account."""
+    rows = query_all(
+        "SELECT COUNT(*) FROM invoices WHERE account_id = ? AND status = 'open'",
+        (account_id,),
+    )
+    return len(rows)
