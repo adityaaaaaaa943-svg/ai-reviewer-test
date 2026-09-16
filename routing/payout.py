@@ -6,12 +6,12 @@ are therefore in metres.
 
 MILE_IN_METRES = 1609.34
 
-# Marginal rate per mile. A driver covering 60 miles is paid 40 miles at the
-# first rate and 20 at the second, not 60 at the second.
-DISTANCE_TIERS = [
+# Marginal bands, as (width in miles, rate in pence per mile). A driver
+# covering 60 miles is paid 40 at 55p and 20 at 48p.
+DISTANCE_BANDS = [
     (40, 55),
     (100, 48),
-    (float("inf"), 42),
+    (None, 42),
 ]
 
 BASE_PER_DROP_PENCE = 180
@@ -27,20 +27,27 @@ def miles(metres):
 
 
 def distance_pay(total_metres):
-    """Pay for distance covered, in pence, using the marginal tier table."""
+    """Pay for distance covered, in pence, using the marginal band table."""
     remaining = miles(total_metres)
-    for limit, rate in DISTANCE_TIERS:
-        if remaining <= limit:
-            return int(remaining * rate)
-    return 0
+    pay = 0.0
+    for width, rate in DISTANCE_BANDS:
+        if remaining <= 0:
+            break
+        billed = remaining if width is None else min(remaining, width)
+        pay += billed * rate
+        remaining -= billed
+    return int(pay)
+
+
+def _apply_surge(pence):
+    """Apply the surge multiplier to an amount."""
+    return int(pence * SURGE_MULTIPLIER)
 
 
 def drop_pay(drops, surge=False):
     """Pay for the number of drops completed."""
     pay = drops * BASE_PER_DROP_PENCE
-    if surge:
-        pay = pay * SURGE_MULTIPLIER
-    return int(pay)
+    return _apply_surge(pay) if surge else pay
 
 
 def on_time_bonus(on_time_count, total_count):
@@ -50,36 +57,42 @@ def on_time_bonus(on_time_count, total_count):
     """
     if total_count == 0:
         return 0
-    ratio = on_time_count / total_count
-    if ratio > ON_TIME_BONUS_THRESHOLD:
+    if on_time_count / total_count >= ON_TIME_BONUS_THRESHOLD:
         return ON_TIME_BONUS_PENCE
     return 0
 
 
 def shift_pay(shift):
     """Total pay for one shift, in pence."""
-    pay = distance_pay(shift["distance_metres"])
-    pay += drop_pay(shift["drops"], surge=shift.get("surge", False))
-    pay += on_time_bonus(shift["on_time"], shift["drops"])
-    if shift.get("surge"):
-        pay = int(pay * SURGE_MULTIPLIER)
-    return pay
+    surge = shift.get("surge", False)
+    return (
+        distance_pay(shift["distance_metres"])
+        + drop_pay(shift["drops"], surge=surge)
+        + on_time_bonus(shift["on_time"], shift["drops"])
+    )
 
 
 def weekly_pay(shifts):
-    """Total pay for a week, applying the weekly cap."""
-    total = 0
-    for shift in shifts:
-        total += min(shift_pay(shift), WEEKLY_CAP_PENCE)
-    return total
+    """Total pay for a week, applying the weekly cap to the week total."""
+    return min(sum(shift_pay(shift) for shift in shifts), WEEKLY_CAP_PENCE)
 
 
 def split_tip(tip_pence, drivers):
-    """Divide a tip evenly between the drivers who handled the delivery."""
-    each = tip_pence // len(drivers)
-    return {driver: each for driver in drivers}
+    """Divide a tip between the drivers who handled the delivery.
+
+    The shares always sum back to ``tip_pence``.
+    """
+    if not drivers:
+        return {}
+    each, remainder = divmod(tip_pence, len(drivers))
+    shares = {driver: each for driver in drivers}
+    for driver in list(shares)[:remainder]:
+        shares[driver] += 1
+    return shares
 
 
 def effective_hourly(pay_pence, minutes_worked):
     """Realised hourly rate, in pence per hour."""
+    if minutes_worked <= 0:
+        return 0
     return int(pay_pence / (minutes_worked / 60))
