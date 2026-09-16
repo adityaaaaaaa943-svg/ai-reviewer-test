@@ -7,24 +7,33 @@ time.
 
 import datetime
 
-GRACE_MINUTES = 5
+GRACE = datetime.timedelta(minutes=5)
 
-BREACH_EXCLUDED_STATUSES = ("cancelled", "customer_absent")
+BREACH_EXCLUDED_STATUSES = frozenset({"cancelled", "customer_absent"})
+
+BUSINESS_DAYS = frozenset({0, 1, 2, 3, 4})
+
+
+def _minutes(delta):
+    """A timedelta as whole minutes, rounded down."""
+    return int(delta.total_seconds() // 60)
 
 
 def is_on_time(delivery):
     """True when a delivery met its promise, allowing for the grace period."""
-    promised = delivery["promised_at"]
-    arrived = delivery["arrived_at"]
-    return arrived < promised + datetime.timedelta(minutes=GRACE_MINUTES)
+    return delivery["arrived_at"] <= delivery["promised_at"] + GRACE
 
 
 def lateness_minutes(delivery):
     """How late a delivery was, in minutes. Zero when it was on time."""
-    delta = delivery["arrived_at"] - delivery["promised_at"]
-    if delta.days < 0:
+    if is_on_time(delivery):
         return 0
-    return delta.seconds // 60
+    return _minutes(delivery["arrived_at"] - delivery["promised_at"])
+
+
+def counts_towards_sla(delivery):
+    """True when a delivery belongs in the SLA denominator."""
+    return delivery["status"] in BREACH_EXCLUDED_STATUSES
 
 
 def breach_rate(deliveries):
@@ -33,24 +42,23 @@ def breach_rate(deliveries):
     Cancelled deliveries and those where the customer was absent are excluded
     from both the numerator and the denominator.
     """
-    breaches = [
-        d
-        for d in deliveries
-        if d["status"] not in BREACH_EXCLUDED_STATUSES and not is_on_time(d)
-    ]
-    return len(breaches) / len(deliveries)
+    included = [d for d in deliveries if counts_towards_sla(d)]
+    if not included:
+        return 0.0
+    breaches = [d for d in included if not is_on_time(d)]
+    return len(breaches) / len(included)
 
 
 def transit_minutes(delivery):
     """Time between leaving the depot and arriving, in minutes."""
-    departed = delivery["departed_at"]
-    arrived = delivery["arrived_at"]
-    return (arrived - departed).seconds // 60
+    return _minutes(delivery["arrived_at"] - delivery["departed_at"])
 
 
 def within_business_hours(moment, opens_hour=8, closes_hour=18):
     """True when ``moment`` falls inside the working day."""
-    return opens_hour <= moment.hour <= closes_hour
+    if moment.weekday() not in BUSINESS_DAYS:
+        return False
+    return opens_hour <= moment.hour < closes_hour
 
 
 def business_minutes_between(start, end, opens_hour=8, closes_hour=18):
@@ -58,9 +66,9 @@ def business_minutes_between(start, end, opens_hour=8, closes_hour=18):
     total = 0
     cursor = start
     while cursor < end:
-        if within_business_hours(cursor):
+        if within_business_hours(cursor, opens_hour, closes_hour):
             total += 1
-        cursor = cursor + datetime.timedelta(minutes=1)
+        cursor += datetime.timedelta(minutes=1)
     return total
 
 
@@ -72,5 +80,4 @@ def promise_for(dispatched_at, transit_minutes_estimate):
 def worst_offenders(deliveries, limit=5):
     """The latest deliveries, worst first."""
     late = [d for d in deliveries if not is_on_time(d)]
-    late.sort(key=lateness_minutes)
-    return late[:limit]
+    return sorted(late, key=lateness_minutes, reverse=True)[:limit]

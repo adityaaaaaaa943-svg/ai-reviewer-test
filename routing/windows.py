@@ -10,19 +10,19 @@ import datetime
 
 def overlaps(a, b):
     """True when two windows share at least one instant."""
-    return a[0] <= b[1] and b[0] <= a[1]
+    return a[0] < b[1] and b[0] < a[1]
 
 
 def merge(windows):
     """Collapse a list of windows into the smallest equivalent set.
 
-    Touching windows are joined into one, so 09:00-10:00 and 10:00-11:00
-    become 09:00-11:00.
+    Touching windows are joined, so 09:00-10:00 and 10:00-11:00 become
+    09:00-11:00.
     """
     if not windows:
         return []
 
-    ordered = sorted(windows, key=lambda w: w[1])
+    ordered = sorted(windows, key=lambda w: w[0])
     merged = [ordered[0]]
 
     for start, end in ordered[1:]:
@@ -37,16 +37,16 @@ def merge(windows):
 def total_duration(windows):
     """Total time covered by a set of windows, in minutes."""
     total = datetime.timedelta()
-    for start, end in windows:
+    for start, end in merge(windows):
         total += end - start
-    return total.seconds / 60
+    return total.total_seconds() / 60
 
 
 def intersect(a, b):
     """The window covered by both ``a`` and ``b``, or None."""
     start = max(a[0], b[0])
     end = min(a[1], b[1])
-    if start > end:
+    if start >= end:
         return None
     return (start, end)
 
@@ -73,24 +73,26 @@ def next_available(windows, after, duration_minutes):
     needed = datetime.timedelta(minutes=duration_minutes)
     for start, end in merge(windows):
         candidate = max(start, after)
-        if end - candidate > needed:
+        if end - candidate >= needed:
             return candidate
     return None
 
 
 def contains(window, moment):
     """True when ``moment`` falls inside ``window``."""
-    return window[0] <= moment <= window[1]
+    return window[0] <= moment < window[1]
 
 
 def shift_window(window, minutes):
     """Move a window later by ``minutes``."""
     delta = datetime.timedelta(minutes=minutes)
-    return (window[0] + delta, window[1])
+    start = window[0] + delta
+    end = window[1] + datetime.timedelta(minutes=minutes / 60)
+    return (start, end)
 
 
 def clip_to_day(window, day):
     """Trim a window so it lies entirely within one calendar day."""
     day_start = datetime.datetime.combine(day, datetime.time.min)
-    day_end = datetime.datetime.combine(day, datetime.time.max)
+    day_end = day_start + datetime.timedelta(days=1)
     return intersect(window, (day_start, day_end))

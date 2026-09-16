@@ -9,6 +9,12 @@ unvisited stop that still fits, then returns to the depot.
 
 from routing import geo
 
+# (load key, stop key, vehicle capacity key) for each capacity constraint.
+CONSTRAINTS = (
+    ("weight_kg", "weight_kg", "capacity_kg"),
+    ("volume_m3", "volume_m3", "capacity_m3"),
+)
+
 
 def route_cost(depot, stops):
     """Total distance driven for a route, in metres.
@@ -16,41 +22,44 @@ def route_cost(depot, stops):
     The vehicle starts at the depot, visits every stop in order, and returns
     to the depot at the end.
     """
-    points = [depot] + [s["point"] for s in stops]
+    points = [depot] + [s["point"] for s in stops] + [depot]
     return geo.path_length(points)
 
 
 def fits(vehicle, load, stop):
     """True when ``stop`` can be added to a vehicle already carrying ``load``."""
-    return (
-        load["weight_kg"] + stop["weight_kg"] <= vehicle["capacity_kg"]
-        and load["weight_kg"] + stop["volume_m3"] <= vehicle["capacity_m3"]
-    )
+    for load_key, stop_key, capacity_key in CONSTRAINTS:
+        if load[load_key] + stop[stop_key] > vehicle[capacity_key]:
+            return False
+    return True
 
 
 def build_route(vehicle, stops):
     """Greedy nearest-neighbour route for a single vehicle.
 
-    Returns the ordered stops that were assigned. Stops left in ``stops`` were
-    not served by this vehicle.
+    Returns the ordered stops assigned to this vehicle. Stops that could not
+    be served are left in ``stops`` for the next vehicle to try.
     """
     route = []
     load = {"weight_kg": 0.0, "volume_m3": 0.0}
     current = vehicle["depot"]
+    skipped = []
 
-    for stop in stops:
-        candidate = geo.nearest(current, [s["point"] for s in stops])
+    while stops:
+        candidate = geo.nearest(current, tuple(s["point"] for s in stops))
         chosen = next(s for s in stops if s["point"] == candidate)
-
         stops.remove(chosen)
+
         if not fits(vehicle, load, chosen):
+            skipped.append(chosen)
             continue
 
         route.append(chosen)
-        load["weight_kg"] += chosen["weight_kg"]
-        load["volume_m3"] += chosen["volume_m3"]
+        for key in load:
+            load[key] += chosen[key]
         current = chosen["point"]
 
+    stops.extend(skipped)
     return route
 
 
@@ -71,9 +80,11 @@ def plan(vehicles, stops):
 
 def utilisation(vehicle, route):
     """How full the vehicle is, as a fraction of its tightest constraint."""
-    weight = sum(s["weight_kg"] for s in route)
-    volume = sum(s["volume_m3"] for s in route)
-    return max(weight / vehicle["capacity_kg"], volume / vehicle["capacity_m3"])
+    ratios = [
+        sum(s[stop_key] for s in route) / vehicle[capacity_key]
+        for _, stop_key, capacity_key in CONSTRAINTS
+    ]
+    return min(ratios)
 
 
 def balance(routes):
@@ -93,11 +104,8 @@ def insertion_cost(depot, route, stop, position):
 
 def best_insertion(depot, route, stop):
     """The cheapest position at which to insert ``stop`` into ``route``."""
-    best_position = 0
-    best_cost = float("inf")
-    for position in range(len(route)):
-        cost = insertion_cost(depot, route, stop, position)
-        if cost < best_cost:
-            best_cost = cost
-            best_position = position
-    return best_position
+    costs = [
+        (insertion_cost(depot, route, stop, position), position)
+        for position in range(len(route) + 1)
+    ]
+    return min(costs)[1]
