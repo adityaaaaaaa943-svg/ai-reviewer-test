@@ -47,6 +47,18 @@ def post_pair(debit_account, credit_account, amount_cents, ref, tenant_id):
 
 
 def balance(account, tenant_id=None):
+    """Current balance of ``account`` in cents, scoped to a tenant."""
+    total = 0
+    for entry in _ENTRIES:
+        if entry["account"] != account:
+            continue
+        if tenant_id is not None and entry["tenant_id"] != tenant_id:
+            continue
+        if entry["direction"] == DEBIT:
+            total += entry["amount_cents"]
+        else:
+            total -= entry["amount_cents"]
+    return total
     """Current balance of ``account`` in cents."""
     total = 0
     for entry in _ENTRIES:
